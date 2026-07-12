@@ -9,10 +9,6 @@ const app = await alchemy("email-finder");
 
 export const web = await TanStackStart("web", {
   cwd: "../../apps/web",
-  bindings: {
-    VITE_SERVER_URL: alchemy.env.VITE_SERVER_URL!,
-    CORS_ORIGIN: alchemy.env.CORS_ORIGIN!,
-  },
 });
 
 console.log(`Web    -> ${web.url}`);
