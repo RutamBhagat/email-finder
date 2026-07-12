@@ -1,4 +1,6 @@
+import transliterate from "@sindresorhus/transliterate";
 import { createFileRoute } from "@tanstack/react-router";
+import { getDomain } from "tldts";
 
 type MxAnswer = {
   data: string;
@@ -56,16 +58,11 @@ export const Route = createFileRoute("/api/find-email")({
 });
 
 function normalizeName({ value }: { value: string }) {
-  return value
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z]/g, "");
+  return transliterate(value.trim().toLowerCase()).replace(/[^a-z]/g, "");
 }
 
 function normalizeDomain({ value }: { value: string }) {
-  return value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  return getDomain(value.trim().toLowerCase()) ?? "";
 }
 
 function isDomain({ value }: { value: string }) {
