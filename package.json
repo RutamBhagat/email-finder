@@ -11,7 +11,7 @@
     "build": "pnpm --recursive --if-present run build",
     "check-types": "pnpm --recursive --if-present run check-types",
     "dev:web": "pnpm --filter web run dev:bare",
-    "deploy": "pnpm --filter @email-finder/infra run deploy",
+    "deploy": "echo 'Deployment disabled: SMTP mailbox checks are intentionally local-development only.'",
     "destroy": "pnpm --filter @email-finder/infra run destroy"
   },
   "dependencies": {

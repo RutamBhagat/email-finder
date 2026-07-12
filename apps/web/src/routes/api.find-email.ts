@@ -43,7 +43,10 @@ export const Route = createFileRoute("/api/find-email")({
             return Response.json({ error: "No mail server was found for this domain." }, { status: 422 });
           }
 
-          const results = generateEmails({ firstName, lastName, domain });
+          const candidates = generateEmails({ firstName, lastName, domain });
+          const results = import.meta.env.DEV
+            ? await checkMailboxes({ candidates, domain, mxHost })
+            : candidates;
 
           return Response.json({ domain, mxHost, results });
         } catch {
@@ -91,4 +94,95 @@ function generateEmails({ firstName, lastName, domain }: { firstName: string; la
     confidence,
     detail,
   }));
+}
+
+async function checkMailboxes({
+  candidates,
+  domain,
+  mxHost,
+}: {
+  candidates: ReturnType<typeof generateEmails>;
+  domain: string;
+  mxHost: string;
+}) {
+  try {
+    const { createConnection } = await import("node:net");
+    const { createInterface } = await import("node:readline");
+    const socket = createConnection({ host: mxHost, port: 25 });
+    socket.setTimeout(8_000, () => socket.destroy());
+    const lines = createInterface({ input: socket, crlfDelay: Infinity })[Symbol.asyncIterator]();
+
+    await new Promise<void>((resolve, reject) => {
+      socket.once("connect", resolve);
+      socket.once("error", reject);
+    });
+
+    await readReply({ lines });
+    await sendCommand({ command: "EHLO mailroute.local", lines, socket });
+    await sendCommand({ command: "MAIL FROM:<>", lines, socket });
+
+    const randomEmail = `${crypto.randomUUID().replaceAll("-", "")}@${domain}`;
+    const catchAllCode = await sendCommand({ command: `RCPT TO:<${randomEmail}>`, lines, socket });
+
+    if (isAccepted({ code: catchAllCode })) {
+      socket.end("QUIT\r\n");
+      return candidates.map((candidate) => ({
+        ...candidate,
+        confidence: "Unknown",
+        detail: "This domain accepts random addresses (catch-all)",
+      }));
+    }
+    if (!isRejected({ code: catchAllCode })) throw new Error("SMTP verification unavailable");
+
+    const results = [];
+    for (const candidate of candidates) {
+      const code = await sendCommand({ command: `RCPT TO:<${candidate.email}>`, lines, socket });
+      results.push({
+        ...candidate,
+        confidence: isAccepted({ code }) ? "Likely valid" : isRejected({ code }) ? "Rejected" : "Unknown",
+        detail: isAccepted({ code })
+          ? "Accepted by the company mail server"
+          : isRejected({ code })
+            ? "Rejected by the company mail server"
+            : "The company mail server did not give a clear answer",
+      });
+    }
+
+    socket.end("QUIT\r\n");
+    return results.sort((a, b) => Number(b.confidence === "Likely valid") - Number(a.confidence === "Likely valid"));
+  } catch {
+    return candidates.map((candidate) => ({
+      ...candidate,
+      confidence: "Unknown",
+      detail: "The local SMTP check was blocked or timed out",
+    }));
+  }
+}
+
+async function sendCommand({ command, lines, socket }: { command: string; lines: AsyncIterator<string>; socket: import("node:net").Socket }) {
+  socket.write(`${command}\r\n`);
+  return readReply({ lines });
+}
+
+async function readReply({ lines }: { lines: AsyncIterator<string> }) {
+  const first = await lines.next();
+  if (first.done) throw new Error("SMTP connection closed");
+
+  const code = Number(first.value.slice(0, 3));
+  if (first.value[3] === "-") {
+    while (true) {
+      const next = await lines.next();
+      if (next.done) throw new Error("SMTP connection closed");
+      if (next.value.startsWith(`${code} `)) break;
+    }
+  }
+  return code;
+}
+
+function isAccepted({ code }: { code: number }) {
+  return code === 250 || code === 251;
+}
+
+function isRejected({ code }: { code: number }) {
+  return code >= 500 && code < 600;
 }

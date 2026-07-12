@@ -2,17 +2,17 @@
 
 Find likely work email addresses from a person's name and company domain.
 
-Mailroute ranks a short list of common email patterns, looks up the domain's preferred MX server through Cloudflare DNS, and presents one best guess with two fallbacks. It runs as a TanStack Start application on Cloudflare Workers.
+Mailroute ranks common email patterns, looks up the domain's preferred MX server, and checks candidates through SMTP during local development.
 
 > [!IMPORTANT]
-> Mailroute generates likely addresses; it does not confirm that a mailbox exists or can receive mail. Cloudflare Workers cannot connect to SMTP port 25.
+> SMTP mailbox checks only run on the local development server. Deployment is currently disabled because hosted Workers cannot connect to SMTP port 25.
 
 ## Features
 
 - Ranks one best guess and two fallback work email patterns from a name and domain
 - Validates the company domain and resolves its preferred MX host
 - Provides one-click copying for generated addresses
-- Runs locally with Vite and deploys to Cloudflare with Alchemy
+- Runs locally with Vite
 - Shares UI components through a pnpm workspace package
 
 ## Tech stack
@@ -36,13 +36,7 @@ Install the workspace dependencies:
 pnpm install
 ```
 
-Start the application with the Cloudflare development environment:
-
-```bash
-pnpm dev
-```
-
-For the Vite development server without Alchemy, run:
+Start the local development server:
 
 ```bash
 pnpm dev:web
@@ -56,22 +50,15 @@ No application environment variables are currently required.
 
 | Command | Description |
 | --- | --- |
-| `pnpm dev` | Start workspace development through Alchemy |
 | `pnpm dev:web` | Start only the Vite web application |
 | `pnpm build` | Build workspace packages that define a build script |
 | `pnpm check-types` | Check TypeScript in packages that define the script |
-| `pnpm deploy` | Build and deploy the application to Cloudflare |
+| `pnpm run deploy` | Print why deployment is currently disabled |
 | `pnpm destroy` | Remove the deployed Cloudflare resources |
 
-## Deploy to Cloudflare
+## Deployment
 
-Authenticate Alchemy with a Cloudflare account, then deploy from the repository root:
-
-```bash
-pnpm deploy
-```
-
-Alchemy uses [`packages/infra/alchemy.run.ts`](packages/infra/alchemy.run.ts) to build `apps/web` and provision the Cloudflare Worker. The default stage is based on your local username; pass Alchemy configuration through the infrastructure package when you need a named production stage.
+Deployment is disabled while mailbox checks depend on local SMTP access. Run `pnpm run deploy` to see this reminder.
 
 Remove the deployed resources with:
 
