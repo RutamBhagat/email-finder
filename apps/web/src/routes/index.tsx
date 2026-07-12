@@ -7,7 +7,7 @@ import { useState, type FormEvent } from "react";
 type SearchResponse = {
   domain: string;
   mxHost?: string;
-  results: { email: string; detail: string }[];
+  results: { email: string; confidence: string; detail: string }[];
   error?: string;
 };
 
@@ -140,7 +140,8 @@ function Home() {
             <div>
               <div className="mb-7 border-b border-[#dfe4e8] pb-6">
                 <p className="text-sm font-medium text-[#f05a3c]">Results for {data.domain}</p>
-                <h2 className="mt-1 text-3xl font-semibold">Likely addresses</h2>
+                <h2 className="mt-1 text-3xl font-semibold">Best email guess</h2>
+                <p className="mt-2 text-sm text-[#697681]">Start with the first result. The others are fallbacks, not a mailing list.</p>
                 <p className="mt-2 truncate font-mono text-xs text-[#7d8891]">{data.mxHost ?? "No MX host found"}</p>
               </div>
               <div className="overflow-hidden rounded-xl border border-[#dfe4e8] bg-white">
@@ -149,7 +150,10 @@ function Home() {
                     <span title={result.detail} className="grid size-8 place-items-center rounded-full bg-[#fff5d9] text-[#876817]">
                       <ShieldQuestion className="size-4" />
                     </span>
-                    <p className="min-w-0 flex-1 truncate font-mono text-sm font-medium">{result.email}</p>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-mono text-sm font-medium">{result.email}</p>
+                      <p className="mt-1 text-xs text-[#7b8791]">{result.confidence} · {result.detail}</p>
+                    </div>
                     <Button type="button" variant="ghost" size="icon" onClick={() => copyEmail({ email: result.email })}>
                       {copied === result.email ? <Check /> : <Copy />}
                     </Button>
@@ -157,7 +161,7 @@ function Home() {
                 ))}
               </div>
               <p className="mt-5 text-center text-xs text-[#7b8791]">
-                These are likely patterns, not delivery guarantees. Cloudflare Workers cannot connect to SMTP port 25.
+                MX confirms the company receives email, not that this mailbox exists. No message was sent.
               </p>
             </div>
           )}

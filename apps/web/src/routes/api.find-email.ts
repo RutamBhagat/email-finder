@@ -43,10 +43,7 @@ export const Route = createFileRoute("/api/find-email")({
             return Response.json({ error: "No mail server was found for this domain." }, { status: 422 });
           }
 
-          const results = generateEmails({ firstName, lastName, domain }).map((email) => ({
-            email,
-            detail: "Generated from a common work email pattern",
-          }));
+          const results = generateEmails({ firstName, lastName, domain });
 
           return Response.json({ domain, mxHost, results });
         } catch {
@@ -71,20 +68,27 @@ function isDomain({ value }: { value: string }) {
 
 function generateEmails({ firstName, lastName, domain }: { firstName: string; lastName: string; domain: string }) {
   const firstInitial = firstName[0];
-  const lastInitial = lastName[0];
-  const names = [
-    firstName,
-    lastName,
-    `${firstName}.${lastName}`,
-    `${firstName}${lastName}`,
-    `${firstInitial}${lastName}`,
-    `${firstInitial}.${lastName}`,
-    `${firstName}${lastInitial}`,
-    `${lastName}${firstInitial}`,
-    `${lastName}.${firstName}`,
-    `${firstName}-${lastName}`,
-    `${firstName}_${lastName}`,
+  const candidates = [
+    {
+      name: `${firstName}.${lastName}`,
+      confidence: "Best guess",
+      detail: "The most common professional naming pattern",
+    },
+    {
+      name: `${firstInitial}${lastName}`,
+      confidence: "Alternative",
+      detail: "A common compact company pattern",
+    },
+    {
+      name: firstName,
+      confidence: "Alternative",
+      detail: "Often used by smaller teams",
+    },
   ];
 
-  return [...new Set(names)].map((name) => `${name}@${domain}`);
+  return candidates.map(({ name, confidence, detail }) => ({
+    email: `${name}@${domain}`,
+    confidence,
+    detail,
+  }));
 }

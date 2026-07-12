@@ -2,14 +2,14 @@
 
 Find likely work email addresses from a person's name and company domain.
 
-Mailroute generates common email patterns, looks up the domain's preferred MX server through Cloudflare DNS, and presents the results in a simple interface. It runs as a TanStack Start application on Cloudflare Workers.
+Mailroute ranks a short list of common email patterns, looks up the domain's preferred MX server through Cloudflare DNS, and presents one best guess with two fallbacks. It runs as a TanStack Start application on Cloudflare Workers.
 
 > [!IMPORTANT]
 > Mailroute generates likely addresses; it does not confirm that a mailbox exists or can receive mail. Cloudflare Workers cannot connect to SMTP port 25.
 
 ## Features
 
-- Generates common work email patterns from a first name, last name, and domain
+- Ranks one best guess and two fallback work email patterns from a name and domain
 - Validates the company domain and resolves its preferred MX host
 - Provides one-click copying for generated addresses
 - Runs locally with Vite and deploys to Cloudflare with Alchemy
@@ -94,4 +94,4 @@ email-finder/
 └── pnpm-workspace.yaml
 ```
 
-The email finder endpoint lives at `apps/web/src/routes/api.find-email.ts`. It normalizes the input, queries Cloudflare's DNS-over-HTTPS API for MX records, and returns a deduplicated list of common email formats.
+The email finder endpoint lives at `apps/web/src/routes/api.find-email.ts`. It normalizes the input, queries Cloudflare's DNS-over-HTTPS API for MX records, and returns a ranked shortlist of common email formats.
