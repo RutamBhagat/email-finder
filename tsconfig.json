@@ -1,0 +1,3 @@
+{
+  "extends": "@email-finder/config/tsconfig.base.json"
+}
