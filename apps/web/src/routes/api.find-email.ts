@@ -105,84 +105,166 @@ async function checkMailboxes({
   domain: string;
   mxHost: string;
 }) {
+  let socket: import("node:net").Socket | undefined;
+  let lineReader: import("node:readline").Interface | undefined;
+
   try {
     const { createConnection } = await import("node:net");
     const { createInterface } = await import("node:readline");
-    const socket = createConnection({ host: mxHost, port: 25 });
-    socket.setTimeout(8_000, () => socket.destroy());
-    const lines = createInterface({ input: socket, crlfDelay: Infinity })[Symbol.asyncIterator]();
+    socket = createConnection({ host: mxHost, port: 25 });
+    lineReader = createInterface({ input: socket, crlfDelay: Infinity });
+    const lines = lineReader[Symbol.asyncIterator]();
 
-    await new Promise<void>((resolve, reject) => {
-      socket.once("connect", resolve);
-      socket.once("error", reject);
-    });
+    await waitForConnection({ socket });
 
-    await readReply({ lines });
-    await sendCommand({ command: "EHLO mailroute.local", lines, socket });
-    await sendCommand({ command: "MAIL FROM:<>", lines, socket });
+    const greeting = await readReply({ lines, phase: "SMTP greeting", socket });
+    if (greeting.code !== 220) throw new Error(`Mail server refused the connection (${greeting.code})`);
+
+    const hello = await sendCommand({ command: "EHLO mailroute.local", lines, phase: "SMTP greeting", socket });
+    if (!isAccepted({ code: hello.code })) throw new Error(`Mail server refused the greeting (${hello.code})`);
+
+    const sender = await sendCommand({ command: "MAIL FROM:<>", lines, phase: "sender check", socket });
+    if (!isAccepted({ code: sender.code })) throw new Error(`Mail server refused verification (${sender.code})`);
 
     const randomEmail = `${crypto.randomUUID().replaceAll("-", "")}@${domain}`;
-    const catchAllCode = await sendCommand({ command: `RCPT TO:<${randomEmail}>`, lines, socket });
+    const catchAll = await sendCommand({ command: `RCPT TO:<${randomEmail}>`, lines, phase: "catch-all check", socket });
 
-    if (isAccepted({ code: catchAllCode })) {
-      socket.end("QUIT\r\n");
+    if (isAccepted({ code: catchAll.code })) {
       return candidates.map((candidate) => ({
         ...candidate,
         confidence: "Unknown",
         detail: "This domain accepts random addresses (catch-all)",
       }));
     }
-    if (!isRejected({ code: catchAllCode })) throw new Error("SMTP verification unavailable");
+    if (!isMailboxRejected({ reply: catchAll })) {
+      return candidates.map((candidate) => ({
+        ...candidate,
+        confidence: "Unknown",
+        detail: isTemporary({ code: catchAll.code })
+          ? `The mail server temporarily deferred verification (${catchAll.code})`
+          : `The mail server would not verify recipients (${catchAll.code})`,
+      }));
+    }
 
     const results = [];
     for (const candidate of candidates) {
-      const code = await sendCommand({ command: `RCPT TO:<${candidate.email}>`, lines, socket });
+      const reply = await sendCommand({
+        command: `RCPT TO:<${candidate.email}>`,
+        lines,
+        phase: `recipient check for ${candidate.email}`,
+        socket,
+      });
       results.push({
         ...candidate,
-        confidence: isAccepted({ code }) ? "Likely valid" : isRejected({ code }) ? "Rejected" : "Unknown",
-        detail: isAccepted({ code })
+        confidence: isAccepted({ code: reply.code }) ? "Likely valid" : isMailboxRejected({ reply }) ? "Rejected" : "Unknown",
+        detail: isAccepted({ code: reply.code })
           ? "Accepted by the company mail server"
-          : isRejected({ code })
+          : isMailboxRejected({ reply })
             ? "Rejected by the company mail server"
-            : "The company mail server did not give a clear answer",
+            : isTemporary({ code: reply.code })
+              ? `The mail server temporarily deferred verification (${reply.code})`
+              : `The mail server did not give a clear answer (${reply.code})`,
       });
     }
 
-    socket.end("QUIT\r\n");
     return results.sort((a, b) => Number(b.confidence === "Likely valid") - Number(a.confidence === "Likely valid"));
-  } catch {
+  } catch (reason) {
+    const message = reason instanceof Error ? reason.message : "SMTP verification failed";
     return candidates.map((candidate) => ({
       ...candidate,
       confidence: "Unknown",
-      detail: "The local SMTP check was blocked or timed out",
+      detail: message,
     }));
+  } finally {
+    lineReader?.close();
+    if (socket && !socket.destroyed) socket.end("QUIT\r\n");
   }
 }
 
-async function sendCommand({ command, lines, socket }: { command: string; lines: AsyncIterator<string>; socket: import("node:net").Socket }) {
-  socket.write(`${command}\r\n`);
-  return readReply({ lines });
+async function waitForConnection({ socket }: { socket: import("node:net").Socket }) {
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      socket.destroy();
+      reject(new Error("SMTP connection timed out"));
+    }, 10_000);
+    socket.once("connect", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+    socket.once("error", (error) => {
+      clearTimeout(timeout);
+      reject(new Error(`SMTP connection failed: ${error.message}`));
+    });
+  });
 }
 
-async function readReply({ lines }: { lines: AsyncIterator<string> }) {
-  const first = await lines.next();
-  if (first.done) throw new Error("SMTP connection closed");
+async function sendCommand({
+  command,
+  lines,
+  phase,
+  socket,
+}: {
+  command: string;
+  lines: AsyncIterator<string>;
+  phase: string;
+  socket: import("node:net").Socket;
+}) {
+  socket.write(`${command}\r\n`);
+  return readReply({ lines, phase, socket });
+}
 
-  const code = Number(first.value.slice(0, 3));
-  if (first.value[3] === "-") {
+async function readReply({ lines, phase, socket }: { lines: AsyncIterator<string>; phase: string; socket: import("node:net").Socket }) {
+  const response = [];
+  const first = await readLine({ lines, phase, socket });
+  response.push(first);
+
+  const code = Number(first.slice(0, 3));
+  if (first[3] === "-") {
     while (true) {
-      const next = await lines.next();
-      if (next.done) throw new Error("SMTP connection closed");
-      if (next.value.startsWith(`${code} `)) break;
+      const next = await readLine({ lines, phase, socket });
+      response.push(next);
+      if (next.startsWith(`${code} `)) break;
     }
   }
-  return code;
+  return { code, message: response.join(" ") };
+}
+
+async function readLine({
+  lines,
+  phase,
+  socket,
+}: {
+  lines: AsyncIterator<string>;
+  phase: string;
+  socket: import("node:net").Socket;
+}) {
+  return new Promise<string>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      socket.destroy();
+      reject(new Error(`${phase} timed out`));
+    }, 30_000);
+    async function readNextLine() {
+      try {
+        const line = await lines.next();
+        if (line.done) reject(new Error(`SMTP connection closed during ${phase}`));
+        else if (!line.value.trim()) await readNextLine();
+        else resolve(line.value);
+      } catch (error) {
+        reject(error);
+      }
+    }
+    readNextLine().finally(() => clearTimeout(timeout));
+  });
 }
 
 function isAccepted({ code }: { code: number }) {
   return code === 250 || code === 251;
 }
 
-function isRejected({ code }: { code: number }) {
-  return code >= 500 && code < 600;
+function isTemporary({ code }: { code: number }) {
+  return code >= 400 && code < 500;
+}
+
+function isMailboxRejected({ reply }: { reply: { code: number; message: string } }) {
+  return reply.code >= 500 && reply.code < 600 && /(?:^|\s)5\.1\.1(?:\s|$)/.test(reply.message);
 }
